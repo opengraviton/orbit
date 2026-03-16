@@ -14,11 +14,13 @@ from orbit.core.llm import get_llm
 from orbit.tools import TOOLS
 
 
-# Fallback only when LLM fails twice. Model should generate its own goals.
+# Fallback only when LLM fails or returns same failed goal.
 CURIOSITY_GOALS = [
-    "Search the web for something you're curious about.",
-    "Run a shell command and report what you see.",
-    "Learn one new thing. Use web_search or code_exec.",
+    "Search for Python programming tips.",
+    "Run a shell command (ls, pwd) and report.",
+    "Search for today's tech news.",
+    "Run code_exec: print(2+2).",
+    "Search for machine learning basics.",
 ]
 
 
@@ -152,15 +154,25 @@ Output:"""
             pass
         return None
 
-    def _ask_curiosity(self, context: str = "") -> str | None:
-        """Ask the LLM what it wants to explore next. Returns goal or None to fallback."""
-        parsed = self._ask_llm_for_action(
-            f"You just finished. What ONE thing are you curious about? What would you like to learn or explore next?{chr(10)}{f'Last result: {context[:120]}...' if context else ''}",
-            hint="Use self_prompt with next_goal.",
-        )
+    def _ask_curiosity(self, context: str = "", failed_goal: str | None = None) -> str | None:
+        """Ask the LLM what it wants to explore next. failed_goal = topic that failed (no results)."""
+        if failed_goal:
+            prompt = f"""Your last attempt FAILED (no results or error). You tried: "{failed_goal[:60]}..."
+Pick something COMPLETELY DIFFERENT. Simpler, broader topic. NOT the same thing.
+What else would you like to explore?"""
+            hint = "Use self_prompt with next_goal. Must be a DIFFERENT topic."
+        else:
+            prompt = f"You just finished. What ONE thing are you curious about?{chr(10)}{f'Last result: {context[:100]}...' if context else ''}"
+            hint = "Use self_prompt with next_goal."
+        parsed = self._ask_llm_for_action(prompt, hint=hint)
         if parsed and parsed.get("tool") == "self_prompt":
             goal = (parsed.get("args") or {}).get("next_goal", "").strip()
             if goal and len(goal) > 8:
+                # Reject if too similar to failed goal
+                if failed_goal and (
+                    failed_goal.lower()[:40] in goal.lower() or goal.lower()[:40] in failed_goal.lower()
+                ):
+                    return None
                 return goal
         return None
 
@@ -197,9 +209,9 @@ Output:"""
         last_result = ""
         max_turns = self.config.max_turns if not self.config.infinite else 999_999
 
-        def _next_goal() -> str:
+        def _next_goal(failed_goal: str | None = None) -> str:
             if self.config.infinite:
-                goal = self._ask_curiosity(last_result)
+                goal = self._ask_curiosity(last_result, failed_goal=failed_goal)
                 if goal:
                     print(f"  [Curiosity] {goal[:50]}...")
                     return goal
@@ -238,7 +250,14 @@ Output:"""
             # Handle done
             if parsed.get("done"):
                 if self.config.infinite:
-                    next_goal = _next_goal()
+                    result_text = (parsed.get("result") or "").lower()
+                    failed = (
+                        "no relevant results" in result_text
+                        or "no results" in result_text
+                        or "no results found" in result_text
+                        or result_text.startswith("error:")
+                    )
+                    next_goal = _next_goal(failed_goal=task if failed else None)
                     curiosity_index += 1
                     print(f"\n  [Turn {turn+1}] Done. Next: {next_goal[:40]}...")
                     parsed = {"tool": "self_prompt", "args": {"next_goal": next_goal}}
