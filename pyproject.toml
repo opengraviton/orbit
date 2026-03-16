@@ -26,8 +26,10 @@ dependencies = [
 
 [project.optional-dependencies]
 browser = ["playwright>=1.40.0"]
+system = ["pyautogui>=0.9.54"]
 full = [
     "orbit[browser]",
+    "orbit[system]",
     "chromadb>=0.4.0",
 ]
 

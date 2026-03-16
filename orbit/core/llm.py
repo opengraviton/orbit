@@ -60,12 +60,26 @@ class TransformersBackend(LLMBackend):
         if self._model is None:
             from transformers import AutoModelForCausalLM, AutoTokenizer
             import torch
-            self._tokenizer = AutoTokenizer.from_pretrained(self.model_id)
+            self._tokenizer = AutoTokenizer.from_pretrained(self.model_id, trust_remote_code=True)
             self._model = AutoModelForCausalLM.from_pretrained(
                 self.model_id,
-                torch_dtype=getattr(torch, "float16", torch.float16),
+                torch_dtype=torch.float16,
                 device_map="auto",
+                trust_remote_code=True,
             )
+
+    def _format_prompt(self, prompt: str) -> str:
+        """Use chat template for Instruct models, else raw prompt."""
+        if hasattr(self._tokenizer, "apply_chat_template") and self._tokenizer.chat_template is not None:
+            try:
+                return self._tokenizer.apply_chat_template(
+                    [{"role": "user", "content": prompt}],
+                    tokenize=False,
+                    add_generation_prompt=True,
+                )
+            except Exception:
+                pass
+        return prompt
 
     def generate(
         self,
@@ -77,7 +91,8 @@ class TransformersBackend(LLMBackend):
         from transformers import TextIteratorStreamer
 
         self._ensure_loaded()
-        inputs = self._tokenizer(prompt, return_tensors="pt").to(self._model.device)
+        formatted = self._format_prompt(prompt)
+        inputs = self._tokenizer(formatted, return_tensors="pt").to(self._model.device)
         streamer = TextIteratorStreamer(self._tokenizer, skip_prompt=True, skip_special_tokens=True)
         print("  Generating... ", end="", flush=True)
         import threading

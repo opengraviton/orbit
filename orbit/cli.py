@@ -15,23 +15,24 @@ def main():
     sub = parser.add_subparsers(dest="cmd")
 
     p_run = sub.add_parser("run", help="Run agent on a task")
-    p_run.add_argument("--model", default="TinyLlama/TinyLlama-1.1B-Chat-v1.0", help="Model path or HuggingFace ID")
+    p_run.add_argument("--model", default="Qwen/Qwen2.5-7B-Instruct", help="Model. Qwen2.5-3B-Instruct for less RAM.")
     p_run.add_argument("--task", required=True, help="Task for the agent")
     p_run.add_argument("--max-turns", type=int, default=10)
     p_run.set_defaults(func=cmd_run)
 
     p_improve = sub.add_parser("self-improve", help="Run self-improvement loop: generate data -> train -> improved checkpoint")
-    p_improve.add_argument("--model", default="TinyLlama/TinyLlama-1.1B-Chat-v1.0")
+    p_improve.add_argument("--model", default="Qwen/Qwen2.5-7B-Instruct")
     p_improve.add_argument("--num-examples", type=int, default=30)
     p_improve.add_argument("--steps", type=int, default=50)
     p_improve.add_argument("--output", default="./orbit_improved")
     p_improve.set_defaults(func=cmd_self_improve)
 
     p_auto = sub.add_parser("autonomous", help="AGI mode: run without user task. Agent sets its own goals, never stops.")
-    p_auto.add_argument("--model", default="TinyLlama/TinyLlama-1.1B-Chat-v1.0")
+    p_auto.add_argument("--model", default="Qwen/Qwen2.5-7B-Instruct", help="Model. Try Qwen2.5-3B-Instruct for less RAM.")
     p_auto.add_argument("--max-turns", type=int, default=None, help="Limit turns. Omit for infinite (baby mode).")
     p_auto.add_argument("--seed-goal", default=None, help="Optional first goal. If omitted, agent generates one.")
     p_auto.add_argument("--creator", default="fatihturker", help="Creator identity (first thing agent learns).")
+    p_auto.add_argument("--full-control", action="store_true", help="Full PC control: browser, mouse, keyboard, shell.")
     p_auto.set_defaults(func=cmd_autonomous)
 
     args = parser.parse_args()
@@ -72,11 +73,23 @@ def cmd_autonomous(args):
         max_turns=max_turns,
         autonomous=True,
         infinite=args.max_turns is None,
+        full_control=args.full_control,
         creator=args.creator,
     )
     agent = Agent(config)
-    task = args.seed_goal or "Your first learning: know your creator. Then explore the world like a baby — search, question, learn. Never stop. Use self_prompt for your next curiosity."
+    if args.seed_goal:
+        task = args.seed_goal
+    elif args.full_control:
+        task = "1) web_search for something interesting. 2) run_command (ls, pwd, whoami, or date). 3) Say done with a short summary. One tool per step. Vary your queries and commands."
+    else:
+        task = "Your first learning: know your creator. Then explore the world like a baby — search, question, learn. Never stop. Use self_prompt for your next curiosity."
     print(f"\n  Orbit AUTONOMOUS | model={args.model}")
+    if args.full_control:
+        print(f"  Full control: browser, mouse, keyboard, shell.")
+        if args.max_turns is None:
+            print(f"  Infinite mode. Ctrl+C to stop.\n")
+        else:
+            print()
     if args.max_turns is None:
         print(f"  Baby mode: never stops, keeps learning. Ctrl+C to exit.\n")
     else:

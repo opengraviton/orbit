@@ -35,19 +35,26 @@ cd orbit
 pip install -e ".[full]"
 ```
 
-For browser control:
+For full browser control (visible window, click, type):
 ```bash
+pip install playwright pyautogui
 playwright install chromium
 ```
+
+On macOS, grant **Accessibility** permission for mouse/keyboard control (System Settings → Privacy & Security).
 
 ## Quick Start
 
 ```bash
-# Run agent with Graviton (local model)
-orbit run --model path/to/checkpoint --task "Search the web for X and summarize"
+# Run a task (Qwen 7B default)
+orbit run --task "Run whoami"
+orbit run --task "Search for AI news"
 
-# Or with HuggingFace model
-orbit run --model TinyLlama/TinyLlama-1.1B-Chat-v1.0 --task "Write a Python script that fetches weather"
+# Smaller model (less RAM)
+orbit run --model Qwen/Qwen2.5-3B-Instruct --task "Run ls"
+
+# Full control: browser, terminal, mouse, keyboard
+orbit autonomous --full-control
 ```
 
 ## Tools
@@ -55,10 +62,21 @@ orbit run --model TinyLlama/TinyLlama-1.1B-Chat-v1.0 --task "Write a Python scri
 | Tool | Description |
 |------|-------------|
 | `code_exec` | Execute Python/shell code |
+| `run_command` | Run any shell command — full system access |
 | `web_search` | Search the internet |
 | `fetch_url` | Fetch any URL — HTML, JSON, or save to file |
-| `browser` | Control Chromium (navigate, screenshot, extract) |
+| `browser_open` | Open visible browser window |
+| `browser_navigate` | Navigate to URL |
+| `browser_click` | Click element by selector or text |
+| `browser_type` | Type text into page |
+| `browser_screenshot` | Take screenshot |
+| `browser` | Control Chromium (headless: navigate, screenshot, extract) |
 | `browser_form` | Fill and submit forms (signup, login) |
+| `mouse_move` | Move mouse to x,y |
+| `mouse_click` | Click at position |
+| `keyboard_type` | Type text via keyboard |
+| `keyboard_press` | Press key (enter, tab, etc.) |
+| `screen_size` | Get screen dimensions |
 | `train_model` | Train small model via graviton-native |
 | `deploy` | Deploy model to HuggingFace |
 | `generate_training_data` | Generate training examples with current model |
