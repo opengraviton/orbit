@@ -8,7 +8,7 @@ from orbit.tools import TOOLS
 
 def test_agent_config_defaults():
     config = AgentConfig()
-    assert config.model_path == "TinyLlama/TinyLlama-1.1B-Chat-v1.0"
+    assert config.model_path == "Qwen/Qwen2.5-7B-Instruct"
     assert config.max_turns == 10
 
 
@@ -51,3 +51,20 @@ def test_tools_registered():
     assert "fetch_url" in TOOLS
     assert "self_prompt" in TOOLS
     assert "call_model" in TOOLS
+
+
+def test_goal_similar():
+    agent = Agent(AgentConfig())
+    # Same topic - orbit + features
+    assert agent._goal_similar(
+        "What new features for Orbit project",
+        "What new features or improvements could be added to the Orbit project",
+    ) is True
+    # Different topics
+    assert agent._goal_similar(
+        "What new features for Orbit project",
+        "Search for Python programming tips",
+    ) is False
+    # Empty/short
+    assert agent._goal_similar("", "something") is False
+    assert agent._goal_similar("hi", "hi") is False

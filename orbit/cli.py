@@ -1,6 +1,7 @@
 """Orbit CLI."""
 
 import argparse
+import logging
 import os
 import sys
 
@@ -8,6 +9,16 @@ import sys
 os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
 
 from orbit.core.agent import Agent, AgentConfig
+
+# Configure orbit.agent logger — set ORBIT_DEBUG=1 to see web_search result logs
+def _setup_logging(debug: bool = False):
+    level = logging.DEBUG if (debug or os.environ.get("ORBIT_DEBUG")) else logging.INFO
+    log = logging.getLogger("orbit.agent")
+    log.setLevel(level)
+    if debug or os.environ.get("ORBIT_DEBUG") and not log.handlers:
+        h = logging.StreamHandler(sys.stderr)
+        h.setFormatter(logging.Formatter("%(message)s"))
+        log.addHandler(h)
 
 
 def main():
@@ -33,6 +44,7 @@ def main():
     p_auto.add_argument("--seed-goal", default=None, help="Optional first goal. If omitted, agent generates one.")
     p_auto.add_argument("--creator", default="fatihturker", help="Creator identity (first thing agent learns).")
     p_auto.add_argument("--full-control", action="store_true", help="Full PC control: browser, mouse, keyboard, shell.")
+    p_auto.add_argument("--debug", action="store_true", help="Log web_search results etc. (or set ORBIT_DEBUG=1)")
     p_auto.set_defaults(func=cmd_autonomous)
 
     args = parser.parse_args()
@@ -67,6 +79,7 @@ def cmd_self_improve(args):
 
 
 def cmd_autonomous(args):
+    _setup_logging(getattr(args, "debug", False))
     max_turns = args.max_turns if args.max_turns is not None else 999_999
     config = AgentConfig(
         model_path=args.model,
@@ -80,9 +93,9 @@ def cmd_autonomous(args):
     if args.seed_goal:
         task = args.seed_goal
     elif args.full_control:
-        task = "1) web_search for something interesting. 2) run_command (ls, pwd, whoami, or date). 3) Say done with a short summary. One tool per step. Vary your queries and commands."
+        task = "1) web_search for something interesting. 2) run_command (ls, pwd, whoami, or date). 3) Optionally chat_with_ai or open_ai_chat (huggingface/chatgpt) to learn from other AIs. 4) Say done with a short summary. One tool per step. Vary your queries."
     else:
-        task = "Your first learning: know your creator. Then explore the world like a baby — search, question, learn. Never stop. Use self_prompt for your next curiosity."
+        task = "Your first learning: know your creator. Then explore the world like a baby — search, question, learn. Use chat_with_ai or open_ai_chat (huggingface) to talk to other AIs when curious. Never stop. Use self_prompt for your next curiosity."
     print(f"\n  Orbit AUTONOMOUS | model={args.model}")
     if args.full_control:
         print(f"  Full control: browser, mouse, keyboard, shell.")

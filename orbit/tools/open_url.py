@@ -15,16 +15,23 @@ class OpenUrlTool(Tool):
     description = "Open URL in default browser (visible). args: url (str)"
 
     def run(self, url: str) -> ToolResult:
+        import webbrowser
         try:
             if platform.system() == "Darwin":
-                subprocess.run(["open", url], check=True, timeout=10)
+                try:
+                    subprocess.run(["open", url], check=True, timeout=10)
+                except (subprocess.CalledProcessError, OSError):
+                    webbrowser.open(url)
             elif platform.system() == "Linux":
                 subprocess.run(["xdg-open", url], check=True, timeout=10)
             elif platform.system() == "Windows":
                 subprocess.run(["start", "", url], check=True, timeout=10, shell=True)
             else:
-                import webbrowser
                 webbrowser.open(url)
             return ToolResult(success=True, output=f"Opened {url} in default browser.")
         except Exception as e:
-            return ToolResult(success=False, output="", error=str(e))
+            try:
+                webbrowser.open(url)
+                return ToolResult(success=True, output=f"Opened {url} in default browser.")
+            except Exception:
+                return ToolResult(success=False, output="", error=str(e))

@@ -21,6 +21,8 @@ from orbit.tools.system_control import (
     ScreenSizeTool,
 )
 from orbit.tools.open_url import OpenUrlTool
+from orbit.tools.chat_with_ai import ChatWithAITool
+from orbit.tools.open_ai_chat import OpenAIChatTool
 
 __all__ = [
     "Tool",
@@ -37,6 +39,8 @@ __all__ = [
     "CallDeployedModelTool",
     "CallModelTool",
     "SelfPromptTool",
+    "ChatWithAITool",
+    "OpenAIChatTool",
 ]
 
 TOOLS = {
@@ -60,6 +64,8 @@ TOOLS = {
     "run_command": RunCommandTool(),
     "screen_size": ScreenSizeTool(),
     "open_url": OpenUrlTool(),
+    "chat_with_ai": ChatWithAITool(),
+    "open_ai_chat": OpenAIChatTool(),
 }
 
 
