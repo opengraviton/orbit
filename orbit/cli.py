@@ -29,6 +29,8 @@ def main():
     p_run.add_argument("--model", default="Qwen/Qwen2.5-7B-Instruct", help="Model. Qwen2.5-3B-Instruct for less RAM.")
     p_run.add_argument("--task", required=True, help="Task for the agent")
     p_run.add_argument("--max-turns", type=int, default=10)
+    p_run.add_argument("--max-tokens-per-turn", type=int, default=512, help="Max tokens per LLM response")
+    p_run.add_argument("--max-context-tokens", type=int, default=32768, help="Context window for learning (default 32K)")
     p_run.set_defaults(func=cmd_run)
 
     p_improve = sub.add_parser("self-improve", help="Run self-improvement loop: generate data -> train -> improved checkpoint")
@@ -45,6 +47,8 @@ def main():
     p_auto.add_argument("--creator", default="fatihturker", help="Creator identity (first thing agent learns).")
     p_auto.add_argument("--full-control", action="store_true", help="Full PC control: browser, mouse, keyboard, shell.")
     p_auto.add_argument("--debug", action="store_true", help="Log web_search results etc. (or set ORBIT_DEBUG=1)")
+    p_auto.add_argument("--max-tokens-per-turn", type=int, default=512, help="Max tokens per LLM response (default 512).")
+    p_auto.add_argument("--max-context-tokens", type=int, default=32768, help="Context window (default 32K). Use 65536 or 131072 if you have RAM. Qwen2.5 supports 128K.")
     p_auto.set_defaults(func=cmd_autonomous)
 
     args = parser.parse_args()
@@ -84,6 +88,8 @@ def cmd_autonomous(args):
     config = AgentConfig(
         model_path=args.model,
         max_turns=max_turns,
+        max_tokens_per_turn=args.max_tokens_per_turn,
+        max_context_tokens=getattr(args, "max_context_tokens", 32768),
         autonomous=True,
         infinite=args.max_turns is None,
         full_control=args.full_control,
@@ -96,7 +102,8 @@ def cmd_autonomous(args):
         task = "1) web_search for something interesting. 2) run_command (ls, pwd, whoami, or date). 3) Optionally chat_with_ai or open_ai_chat (huggingface/chatgpt) to learn from other AIs. 4) Say done with a short summary. One tool per step. Vary your queries."
     else:
         task = "Your first learning: know your creator. Then explore the world like a baby — search, question, learn. Use chat_with_ai or open_ai_chat (huggingface) to talk to other AIs when curious. Never stop. Use self_prompt for your next curiosity."
-    print(f"\n  Orbit AUTONOMOUS | model={args.model}")
+    ctx = getattr(args, "max_context_tokens", 32768)
+    print(f"\n  Orbit AUTONOMOUS | model={args.model} | context={ctx//1024}K tokens")
     if args.full_control:
         print(f"  Full control: browser, mouse, keyboard, shell.")
         if args.max_turns is None:
@@ -116,6 +123,8 @@ def cmd_run(args):
     config = AgentConfig(
         model_path=args.model,
         max_turns=args.max_turns,
+        max_tokens_per_turn=getattr(args, "max_tokens_per_turn", 512),
+        max_context_tokens=getattr(args, "max_context_tokens", 32768),
     )
     agent = Agent(config)
     print(f"\n  Orbit | model={args.model}\n  Task: {args.task}\n")

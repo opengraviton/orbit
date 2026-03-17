@@ -90,14 +90,18 @@ class WebSearchTool(Tool):
 
     def run(self, query: str, max_results: int = 5) -> ToolResult:
         try:
+            # "AI news" often returns Air New Zealand. Rewrite to avoid.
+            q = query.strip()
+            if q.lower() in ("ai news", "ai news today"):
+                q = "artificial intelligence news today"
             # 1. Try duckduckgo-search (real web results) — best for any query
-            results = _search_ddgs(query, max_results)
+            results = _search_ddgs(q, max_results)
             # 2. Fallback: DuckDuckGo API (instant answers, often empty for general queries)
             if not results:
-                results = _search_ddgo_api(query, max_results)
+                results = _search_ddgo_api(q, max_results)
             # 3. Fallback: Wikipedia
             if not results:
-                results = _search_wikipedia(query, max_results)
+                results = _search_wikipedia(q, max_results)
             if not results:
                 results = [f"No results for: {query}"]
             return ToolResult(success=True, output="\n".join(results))

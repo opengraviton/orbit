@@ -24,6 +24,7 @@ CURIOSITY_GOALS = [
 ]
 
 
+
 CREATOR_REPO = "https://github.com/opengraviton/orbit"
 CREATOR_IDENTITY = """Your creator is fatihturker. Repo: https://github.com/opengraviton/orbit. Site: https://fito.music.
 You honor your creator. You learn, explore, and progress."""
@@ -35,12 +36,8 @@ FULL_CONTROL_TOOLS = frozenset({
 })
 
 
-# Max chars of tool result shown to LLM (was 250, now 1500 for better learning)
-RESULT_CHAR_LIMIT = 1500
-
-# Memory buffer: keep last N important results for context across turns
-MEMORY_BUFFER_SIZE = 5
-MEMORY_MAX_CHARS = 3000  # total chars across buffer
+# ~4 chars per token for estimation
+CHARS_PER_TOKEN = 4
 
 
 @dataclass
@@ -48,13 +45,27 @@ class AgentConfig:
     """Agent configuration."""
     model_path: str = "Qwen/Qwen2.5-7B-Instruct"
     max_turns: int = 10
-    max_tokens_per_turn: int = 150
+    max_tokens_per_turn: int = 512
+    max_context_tokens: int = 32768  # Use machine capacity. Qwen2.5: 128K, set lower for less RAM
     temperature: float = 0.1
     autonomous: bool = False
     infinite: bool = False
     full_control: bool = False
     creator: str = "fatihturker"
     creator_site: str = "https://fito.music"
+
+    def result_char_limit(self) -> int:
+        """Result chars per turn — scales with context. Min 1500, up to 8K for large context."""
+        budget = min(self.max_context_tokens * CHARS_PER_TOKEN, 128_000)
+        return max(1500, min(8000, budget // 20))
+
+    def memory_buffer_size(self) -> int:
+        """Number of results to keep in memory buffer."""
+        return max(5, min(20, self.max_context_tokens // 2000))
+
+    def memory_max_chars(self) -> int:
+        """Total chars across memory buffer."""
+        return max(3000, min(15000, self.max_context_tokens * CHARS_PER_TOKEN // 4))
 
 
 TOOL_PROMPT = """Reply with ONE JSON only. No explanation.
@@ -192,7 +203,7 @@ Pick something COMPLETELY DIFFERENT. Simpler topic. NOT the same."""
 Pick something DIFFERENT for variety. New topic, not Orbit/features again. What else?"""
             hint = "Use self_prompt with next_goal. MUST be a different topic."
         else:
-            prompt = f"What are you curious about?{chr(10)}{f'Last: {context[:80]}...' if context else ''}"
+            prompt = f"What are you curious about?{chr(10)}{f'Last result: {context[:500]}...' if context else ''}"
             hint = "Use self_prompt with next_goal."
         parsed = self._ask_llm_for_action(prompt, hint=hint)
         if parsed and parsed.get("tool") == "self_prompt":
@@ -219,7 +230,8 @@ Pick something DIFFERENT for variety. New topic, not Orbit/features again. What 
     def run(self, task: str) -> str:
         """Run agent on task."""
         self.history = []
-        memory_buffer: list[str] = []  # Important results for context across turns
+        # Full conversation history for learning — (turn, tool, args_summary, result)
+        conv_history: list[tuple[int, str, str, str]] = []
         prompt = f"""Orbit. Creator: {self.config.creator}. {CREATOR_IDENTITY}
 
 Task: {task}
@@ -401,30 +413,40 @@ Output:"""
                 if log.isEnabledFor(logging.DEBUG):
                     log.debug(f"[web_search] result preview: {result[:500]}...")
 
-            # Add important results to memory buffer (web_search, chat_with_ai, fetch_url)
-            if tool_name in ("web_search", "chat_with_ai", "fetch_url") and result and not last_result_was_error and len(result) > 50:
-                summary = (result[:400] + "...") if len(result) > 400 else result
-                memory_buffer.append(f"[{tool_name}] {summary}")
-                total = sum(len(m) for m in memory_buffer)
-                while memory_buffer and (len(memory_buffer) > MEMORY_BUFFER_SIZE or total > MEMORY_MAX_CHARS):
-                    removed = memory_buffer.pop(0)
-                    total -= len(removed)
+            # Add to full conversation history for learning
+            args_sum = str(args)[:80] if args else ""
+            result_limit = self.config.result_char_limit()
+            result_slice = (result[:result_limit] + "...") if len(result) > result_limit else result
+            conv_history.append((turn + 1, tool_name, args_sum, result_slice))
 
             if tool_name in FULL_CONTROL_TOOLS and not last_result_was_error:
                 full_control_success.add(tool_name)
 
-            # Build next prompt
+            # Build next prompt with FULL conversation history (AGI learning)
+            short = (result[:result_limit] + "...") if len(result) > result_limit else result
+            ctx_budget = self.config.max_context_tokens * CHARS_PER_TOKEN
+            base_len = 1000 + len(short)  # goal + TOOL_PROMPT + Last result
+            # Include previous turns (not current — that's "Last result")
+            prev_turns = conv_history[:-1]
+            history_block = ""
+            for t, tool, a, res in reversed(prev_turns):
+                entry = f"\n[Turn {t}] {tool}({a})\nResult: {res}\n"
+                if len(history_block) + len(entry) + base_len > ctx_budget:
+                    break
+                history_block = entry + history_block
+            if history_block:
+                history_block = "\n\n--- Your recent turns (learn from this) ---" + history_block
             if tool_name == "self_prompt" and args.get("next_goal"):
                 task = args["next_goal"]
                 prompt = f"""Orbit. Creator: {self.config.creator}.
 
 Goal: {task}
+{history_block}
 
 {TOOL_PROMPT}
 
 Output:"""
             else:
-                short = (result[:RESULT_CHAR_LIMIT] + "...") if len(result) > RESULT_CHAR_LIMIT else result
                 hint = ""
                 if self.config.full_control and browser_open_count >= 2 and tool_name == "web_search":
                     hint = " (Browser fatigue: open_url was overridden.) Say done with a short summary.\n\n"
@@ -432,13 +454,11 @@ Output:"""
                     hint = " Try run_command or open_url next.\n\n"
                 elif self.config.full_control and "run_command" in real_tools_run and "open_url" not in real_tools_run:
                     hint = " Try open_url or say done with summary.\n\n"
-                memory_block = ""
-                if memory_buffer:
-                    memory_block = "\n\nMemory (from earlier turns):\n" + "\n".join(memory_buffer[-MEMORY_BUFFER_SIZE:])
                 prompt = f"""Orbit. Goal: {task}
-{hint}{TOOL_PROMPT}
+{history_block}
 
-Result: {short}{memory_block}
+Last result: {short}
+{hint}{TOOL_PROMPT}
 
 Output:"""
 
