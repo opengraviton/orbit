@@ -353,37 +353,77 @@ Output:"""
                     print(f"\n  [Turn {turn+1}] Browser fatigue -> asking LLM")
             elif len(last_tools) >= 2 and last_tools[-1] == last_tools[-2] == tool_name:
                 # Repetition: ask LLM what to do next — no predefined commands
-                if tool_name == "run_command":
+                if tool_name == "self_prompt":
+                    # Stuck setting goals without acting. Force web_search to DO the goal.
+                    query = task[:80] if task and len(task) > 10 else "gravitational waves"
+                    tool_name, args = "web_search", {"query": query}
+                    parsed = {"tool": tool_name, "args": args}
+                    print(f"\n  [Turn {turn+1}] self_prompt loop -> forcing web_search to act on goal")
+                elif tool_name == "run_command":
                     action = self._ask_llm_for_action(
                         f"You've been running shell commands. What would you like to do next?{chr(10)}Last result: {last_result[:80]}...",
                         hint="Use run_command with a different command, or self_prompt with a new goal. Be creative.",
                     )
+                    if action and action.get("tool"):
+                        tool_name, args = action["tool"], action.get("args", {})
+                        parsed = {"tool": tool_name, "args": args}
+                        if tool_name == "self_prompt":
+                            curiosity_index += 1
+                        print(f"\n  [Turn {turn+1}] Repetition -> LLM chose {tool_name}")
+                    else:
+                        next_goal = _next_goal(avoid_goal=task)
+                        curiosity_index += 1
+                        tool_name, args = "self_prompt", {"next_goal": next_goal}
+                        parsed = {"tool": tool_name, "args": args}
+                        print(f"\n  [Turn {turn+1}] Repetition -> new goal")
                 elif tool_name == "code_exec":
                     action = self._ask_llm_for_action(
                         f"You've been running code. What would you like to do next?{chr(10)}Last result: {last_result[:80]}...",
                         hint="Use code_exec with different code, or self_prompt with a new goal. Be creative.",
                     )
+                    if action and action.get("tool"):
+                        tool_name, args = action["tool"], action.get("args", {})
+                        parsed = {"tool": tool_name, "args": args}
+                        if tool_name == "self_prompt":
+                            curiosity_index += 1
+                        print(f"\n  [Turn {turn+1}] Repetition -> LLM chose {tool_name}")
+                    else:
+                        next_goal = _next_goal(avoid_goal=task)
+                        curiosity_index += 1
+                        tool_name, args = "self_prompt", {"next_goal": next_goal}
+                        parsed = {"tool": tool_name, "args": args}
+                        print(f"\n  [Turn {turn+1}] Repetition -> new goal")
                 elif self.config.full_control and tool_name == "web_search" and "run_command" not in real_tools_run:
                     action = self._ask_llm_for_action(
                         "You've done web_search. Try run_command or open_url. What specific command or URL?",
                     )
+                    if action and action.get("tool"):
+                        tool_name, args = action["tool"], action.get("args", {})
+                        parsed = {"tool": tool_name, "args": args}
+                        print(f"\n  [Turn {turn+1}] Repetition -> LLM chose {tool_name}")
+                    else:
+                        next_goal = _next_goal(avoid_goal=task)
+                        curiosity_index += 1
+                        tool_name, args = "self_prompt", {"next_goal": next_goal}
+                        parsed = {"tool": tool_name, "args": args}
+                        print(f"\n  [Turn {turn+1}] Repetition -> new goal")
                 else:
                     action = self._ask_llm_for_action(
                         f"You're repeating. What would you like to explore next?{chr(10)}Last result: {last_result[:80]}...",
                         hint="Use self_prompt with next_goal.",
                     )
-                if action and action.get("tool"):
-                    tool_name, args = action["tool"], action.get("args", {})
-                    parsed = {"tool": tool_name, "args": args}
-                    if tool_name == "self_prompt":
+                    if action and action.get("tool"):
+                        tool_name, args = action["tool"], action.get("args", {})
+                        parsed = {"tool": tool_name, "args": args}
+                        if tool_name == "self_prompt":
+                            curiosity_index += 1
+                        print(f"\n  [Turn {turn+1}] Repetition -> LLM chose {tool_name}")
+                    else:
+                        next_goal = _next_goal(avoid_goal=task)
                         curiosity_index += 1
-                    print(f"\n  [Turn {turn+1}] Repetition -> LLM chose {tool_name}")
-                else:
-                    next_goal = _next_goal(avoid_goal=task)
-                    curiosity_index += 1
-                    tool_name, args = "self_prompt", {"next_goal": next_goal}
-                    parsed = {"tool": tool_name, "args": args}
-                    print(f"\n  [Turn {turn+1}] Repetition -> new goal")
+                        tool_name, args = "self_prompt", {"next_goal": next_goal}
+                        parsed = {"tool": tool_name, "args": args}
+                        print(f"\n  [Turn {turn+1}] Repetition -> new goal")
 
             # Turn limit: every 8 turns, new goal
             elif turn >= 7 and (turn + 1) % 8 == 0 and tool_name != "self_prompt":
@@ -438,12 +478,12 @@ Output:"""
                 history_block = "\n\n--- Your recent turns (learn from this) ---" + history_block
             if tool_name == "self_prompt" and args.get("next_goal"):
                 task = args["next_goal"]
+                act_hint = "\nGoal set. Now ACT on it: use web_search, open_url, or run_command. Do NOT use self_prompt again.\n\n"
                 prompt = f"""Orbit. Creator: {self.config.creator}.
 
 Goal: {task}
 {history_block}
-
-{TOOL_PROMPT}
+{act_hint}{TOOL_PROMPT}
 
 Output:"""
             else:
