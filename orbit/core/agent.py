@@ -92,6 +92,8 @@ class Agent:
         code = re.search(r"```(?:json)?\s*(\{[\s\S]*)\s*```", text)
         if code:
             text = code.group(1)
+        # Recover from !!!!!!!!! repetition — strip trailing only (URLs may contain !)
+        text = re.sub(r'[!\s]+$', '', text)
         if text.count("\n- ") >= 2:
             return None
         if re.search(r'"done"\s*:\s*true', text, re.I):
@@ -110,13 +112,32 @@ class Agent:
                     if depth == 0:
                         break
             else:
+                # No matching } — try recover truncated JSON (model cut off with !!!!)
+                chunk = re.sub(r'[!\s]+$', '', text[start:])
+                for suffix in ('"}}', '"}', '"}]}', '}}'):
+                    try:
+                        d = json.loads(chunk + suffix)
+                        if d.get("tool") and d.get("args"):
+                            found.append(d)
+                            break
+                    except json.JSONDecodeError:
+                        continue
                 start = text.find("{", start + 1)
                 continue
             try:
                 d = json.loads(text[start : i + 1])
             except json.JSONDecodeError:
-                start = text.find("{", start + 1)
-                continue
+                # Recover truncated JSON (e.g. url/query cut off with !!!!)
+                chunk = re.sub(r'[!\s]+$', '', text[start : i + 1])
+                for suffix in ['"}}', '"}', '"}]}']:
+                    try:
+                        d = json.loads(chunk + suffix)
+                        break
+                    except json.JSONDecodeError:
+                        continue
+                else:
+                    start = text.find("{", start + 1)
+                    continue
             if d.get("done") is False:
                 start = text.find("{", start + 1)
                 continue
@@ -274,18 +295,25 @@ Output:"""
 
             if parsed is None:
                 consecutive_fallbacks += 1
-                if consecutive_fallbacks >= 4 and last_result and not last_result_was_error:
-                    print(f"\n  [Turn {turn+1}] Stuck. Returning last result.")
-                    return last_result[:300] if len(last_result) > 300 else last_result
-                # Ask LLM what to do — no predefined commands
-                parsed = self._ask_llm_for_action(
-                    f"Task: {task}{chr(10)}You didn't produce valid JSON. What would you like to do?",
-                    hint=f"Last result: {last_result[:100]}..." if last_result else "",
-                )
+                if consecutive_fallbacks >= 4:
+                    if self.config.infinite:
+                        # Never stop in infinite mode — force recovery
+                        print(f"\n  [Turn {turn+1}] Stuck (No JSON 4x) -> forcing web_search to recover")
+                        parsed = {"tool": "web_search", "args": {"query": task[:60] if task and len(task) > 10 else "technology news"}}
+                        consecutive_fallbacks = 0
+                    elif last_result and not last_result_was_error:
+                        print(f"\n  [Turn {turn+1}] Stuck. Returning last result.")
+                        return last_result[:300] if len(last_result) > 300 else last_result
                 if parsed is None:
-                    goal = _next_goal(avoid_goal=task if task else None)
-                    parsed = {"tool": "self_prompt", "args": {"next_goal": goal}}
-                print(f"\n  [Turn {turn+1}] No JSON. Asking LLM: {parsed.get('tool', '?')}")
+                    # Ask LLM what to do
+                    parsed = self._ask_llm_for_action(
+                        f"Task: {task}{chr(10)}You didn't produce valid JSON. What would you like to do?",
+                        hint=f"Last result: {last_result[:100]}..." if last_result else "",
+                    )
+                    if parsed is None:
+                        goal = _next_goal(avoid_goal=task if task else None)
+                        parsed = {"tool": "self_prompt", "args": {"next_goal": goal}}
+                    print(f"\n  [Turn {turn+1}] No JSON. Asking LLM: {parsed.get('tool', '?')}")
             else:
                 consecutive_fallbacks = 0
 

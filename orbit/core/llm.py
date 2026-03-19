@@ -88,7 +88,7 @@ class TransformersBackend(LLMBackend):
         temperature: float = 0.7,
     ) -> str:
         import sys
-        from transformers import TextIteratorStreamer
+        from transformers import TextIteratorStreamer, StoppingCriteria
 
         self._ensure_loaded()
         formatted = self._format_prompt(prompt)
@@ -98,14 +98,34 @@ class TransformersBackend(LLMBackend):
         import threading
         # do_sample=False when temp very low to avoid nan in multinomial
         do_sample = temperature > 0.2
+        # Stop when model outputs 5+ consecutive "!" — cuts repetition loop short
+        excl_ids = self._tokenizer.encode("!", add_special_tokens=False)
+        excl_id = excl_ids[0] if excl_ids else None
+
+        class StopAtExclamationRepetition(StoppingCriteria):
+            def __init__(self, tid, thresh=5):
+                self.tid = tid
+                self.thresh = thresh
+
+            def __call__(self, input_ids, scores, **kwargs):
+                if self.tid is None or input_ids.shape[1] < self.thresh:
+                    return False
+                last = input_ids[0, -self.thresh:]
+                return all(t == self.tid for t in last.tolist())
+
+        stop_excl = StopAtExclamationRepetition(excl_id, 5) if excl_id is not None else None
         gen_kw = dict(
             **inputs,
             max_new_tokens=max_tokens,
             temperature=max(temperature, 1e-7),
             do_sample=do_sample,
             pad_token_id=self._tokenizer.eos_token_id,
+            repetition_penalty=1.25,  # Prevent !!!!!!!!! repetition loops
             streamer=streamer,
         )
+        if stop_excl is not None:
+            from transformers import StoppingCriteriaList
+            gen_kw["stopping_criteria"] = StoppingCriteriaList([stop_excl])
         result = []
         def run():
             try:
